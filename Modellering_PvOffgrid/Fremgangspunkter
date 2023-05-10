@@ -1,0 +1,7 @@
+Fremdriftsplan i masterarbied:
+
+- Lage en model_per_timestep-fil som ikke tar med utveklsing mellom flex batteri. Utveksling skal i denne 
+  filen kun skje med overskudd og underskuddsenergi. Studer så self sufficent-rate med annen case.
+  
+- Finne ut hvor det blir av energimengden som er å finne mellom "endring i sløst sol" og "endring i udekt forburk"
+
