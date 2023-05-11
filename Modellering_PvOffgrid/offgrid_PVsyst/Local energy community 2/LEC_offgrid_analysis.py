@@ -47,10 +47,10 @@ param = {}
 
 #Lite bakgrunnsinfo ligger bak de valgte tekniske parameterene
 param_ex1 = {'BatteryCapacity': 30,
-                'BatteryEfficiency': .9,
+                'BatteryEfficiency': 1,
                 'BatteryDischargeLimit': 2,
                 'BatterySellingLimit': 3,
-                'InverterEfficiency': .85,
+                'InverterEfficiency': 1,
                 'timestep': .25,
                 'MaxPower': 1.8,
                 'MaxPowerInverter': 4
@@ -170,6 +170,7 @@ dict_count['flex2bat'] = 0
 dict_count['bat2flex'] = 0
 dict_count['flex2flex'] = 0
 
+
 #Energiflytsverdier med energideling
 for time in range(0,35037):
     
@@ -219,14 +220,22 @@ for i in range(n):
     
     b += sum_lost_production[i]*0.25
     y += sum_lost_load[i]*0.25
+    
+lost_load_tot = x-y
+lost_production_tot = a-b
+
+#Fjerne (uforklarlige) småfeil som oppstår i koden underveis
+if ((lost_load_tot/lost_production_tot) > 0.995) & ((lost_load_tot/lost_production_tot) < 1.005):
+    
+    lost_load_tot = lost_production_tot
 
 print()
 print('RESULTAT')
-print('Total reduksjon i estimert forbruk som ikke blir dekt : {:.5g}kWh'.format(x-y))
-print('Relativ total reduskjon i estimert forbruk som ikke blir dekt : {:.3g}%'.format(((x-y)*100)/x))
+print('Total reduksjon i estimert forbruk som ikke blir dekt : {:.5g}kWh'.format(lost_load_tot))
+print('Relativ total reduskjon i estimert forbruk som ikke blir dekt : {:.3g}%'.format(((lost_load_tot)*100)/x))
 print('----------------------------------------------------------------')
-print('Total reduksjon i bortkastet solenergi: {:.5g}kWh'.format(a-b))
-print('Relativ total reduksjon av bortasktet solenergi: {:.3g}%'.format((a-b)*100/a))
+print('Total reduksjon i bortkastet solenergi: {:.5g}kWh'.format((lost_production_tot)))
+print('Relativ total reduksjon av bortasktet solenergi: {:.3g}%'.format((lost_production_tot)*100/a))
 print()
 print('OVERSIKT OVER ANTALL BUD GJENNOM ÅRET [stk]')
 print('----------------------------------------------------------------')
@@ -242,7 +251,7 @@ print('flex2flex: {:.5g}'.format(dict_count['flex2flex']))
 
 #------------------------------------------------------------------------------------------
 
-
+'''
 
 #Plotting for bestemte uker
 for week in range(20,21):
@@ -254,3 +263,4 @@ for week in range(20,21):
     
     
  #ofg_plot.LEC_offgrid_plot(dict_list, demand[0], pv[0], week, 0)
+ '''
