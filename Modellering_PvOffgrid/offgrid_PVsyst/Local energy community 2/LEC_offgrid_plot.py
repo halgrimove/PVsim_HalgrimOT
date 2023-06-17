@@ -14,6 +14,8 @@ import pandas as pd
 DENNE FUNKSJONEN PLOTTER RESULTATENE AV ENERGIFLYT-MODELLERINGEN 
 '''
 
+tap_activate = 1
+
 #-------------------------------------------------------------------------------------------
 
 def LEC_offgrid_plot(dict_list, demand, pv, week, deltaker):
@@ -21,12 +23,6 @@ def LEC_offgrid_plot(dict_list, demand, pv, week, deltaker):
     
     #-------------------------------------------------------------------------------------------
 
-
-    fig, axes = plt.subplots(nrows=3, ncols=1, sharex=True, figsize=(17, 6*3), frameon=False,
-                             gridspec_kw={'height_ratios': [1.5, 1, 1.5], 'hspace': 0.1})
-    
-    plt.xlabel('Time', color='white')
-    plt.xticks(color='white')
     
     E = {}
     E['lost_load'] = []
@@ -43,9 +39,7 @@ def LEC_offgrid_plot(dict_list, demand, pv, week, deltaker):
     E['pv_sell_battery'] = []
     E['pv_buy_pv'] = []
 
-    
-    
-    
+  
     
     for i in range(0,35037):
         
@@ -160,6 +154,15 @@ def LEC_offgrid_plot(dict_list, demand, pv, week, deltaker):
     battery_buy_battery = battery_buy_battery_col[sliced_index]
     battery_buy_pv = battery_buy_pv_col[sliced_index]
     
+    
+    
+    fig, axes = plt.subplots(nrows=3, ncols=1, sharex=True, figsize=(17, 6*3), frameon=False,
+                             gridspec_kw={'height_ratios': [1.5, 3.5, 1.5], 'hspace': 0.1})
+    
+    plt.xlabel('Time', color='black')
+    plt.xticks(color='black')
+    
+    
   
     #EFFEKT PRODUSERT AV SOLCELLEANLEGG   '
     #axes[0].fill_between(pv_sell_pv.index, 0, pv_sell_pv, color='yellow', alpha=.3)
@@ -172,11 +175,11 @@ def LEC_offgrid_plot(dict_list, demand, pv, week, deltaker):
     axes[0].fill_between(pv_sell_pv.index, 0, -pv_sell_pv, color='red', alpha=.2)
     axes[0].fill_between(pv_sell_battery.index, 0, -pv_sell_battery, color='red', alpha=.2)
     
-    axes[0].set_ylabel('Power (kW)',color='white')
-    plt.ylabel('Power (kW)',color='white')
-    plt.yticks(color='white')
-    axes[0].tick_params(axis='both', colors='white')
-    axes[0].set_title('Produksjon fra eget solcelleanelgg og kjøp/salg fra/til av momentan PV', color='white')
+    axes[0].set_ylabel('Power (kW)',color='black')
+    plt.ylabel('Power (kW)',color='black')
+    plt.yticks(color='black')
+    axes[0].tick_params(axis='both', colors='black')
+    axes[0].set_title('Produksjon fra eget solcelleanelgg og kjøp/salg fra/til av momentan PV', color='black')
     #-------------------------------------------------------------------------------------------
     
     
@@ -185,33 +188,33 @@ def LEC_offgrid_plot(dict_list, demand, pv, week, deltaker):
      
     #HVA SOM BLIR DEKT AV FORBURK ETTER KJØP FRA MARKEDET
     axes[1].fill_between(self_consumption_sharing.index, 0, self_consumption_sharing, color='blue', alpha=.2) 
-    plt.yticks(color='white')
+    plt.yticks(color='black')
   
     #EFFKET SOM IKKE ANLEGGET KLARER Å DEKKE
-    axes[1].plot(lost_load_sliced.index, -(lost_load_sliced), color='black', lw=0.5)
+    #axes[1].plot(lost_load_sliced.index, -(lost_load_sliced), color='black', lw=0.5)
     axes[1].fill_between(lost_load_sliced.index,0 , -(lost_load_sliced), color='red', alpha=.2)
     
-    axes[1].set_ylabel('Power (kW)',color='white')
-    plt.ylabel('Power (kW)',color='white')
-    plt.yticks(color='white')
-    axes[1].tick_params(axis='both', colors='white')
-    axes[1].set_title('Dekt, ikke-dekt last og estimert forbruk i egen installasjon', color='white')
+    axes[1].set_ylabel('Power (kW)',color='black')
+    plt.ylabel('Power (kW)',color='black')
+    plt.yticks(color='black')
+    axes[1].tick_params(axis='both', colors='black')
+    axes[1].set_title('Dekt, ikke-dekt last og estimert forbruk i egen installasjon', color='black')
     
     #BATTERISTATUS
     #axes[2].plot(LevelOfCharge.index, LevelOfCharge, color='black', lw=0.5)
     axes[2].fill_between(LevelOfCharge.index, 0, LevelOfCharge, color='grey', alpha=.2)
-    axes[2].set_ylabel('State of Charge (kWh)',color='white')
-    plt.ylabel('Energy (kWh)',color='white')
-    plt.yticks(color='white')
-    axes[2].tick_params(axis='both', colors='white')
-    axes[2].set_title('Batteristatus', color='white')
+    axes[2].set_ylabel('State of Charge (kWh)',color='black')
+    plt.ylabel('Energy (kWh)',color='black')
+    plt.yticks(color='black')
+    axes[2].tick_params(axis='both', colors='black')
+    axes[2].set_title('Batteristatus', color='black')
     
     fig, axes = plt.subplots(nrows=3, ncols=1, sharex=True, figsize=(17, 6*3), frameon=False,
-                             gridspec_kw={'height_ratios': [2, 2, 1.5], 'hspace': 0.1})
+                             gridspec_kw={'height_ratios': [1.5, 3.5, 1.5], 'hspace': 0.1})
     
     
-    plt.xlabel('Time', color='white')
-    plt.xticks(color='white')
+    plt.xlabel('Time', color='black')
+    plt.xticks(color='black')
     
 
     #EFFEKT SOM BATTERIET SELLER TIL PV-ANLEGG OG ANDRE BATTERIER I NETTVERKET
@@ -219,27 +222,26 @@ def LEC_offgrid_plot(dict_list, demand, pv, week, deltaker):
     axes[0].plot(battery_sell_pv.index, -battery_sell_pv, color='black', lw=0.2)
     axes[0].fill_between(battery_sell_battery.index, 0, -battery_sell_battery, color='green', alpha=.4)
     
-    axes[0].set_ylabel('Enhergy (kW)',color='white')
-    plt.ylabel('Energy (kWh)',color='white')
-    axes[0].tick_params(axis='both', colors='white')
-    axes[0].set_title('Salg fra eget batteri til PV-anlegg/batteri hos andre deltakere', color='white')
+    axes[0].set_ylabel('Energy (kW)',color='black')
+    axes[0].tick_params(axis='both', colors='black')
+    axes[0].set_title('Salg fra eget batteri til PV-anlegg/batteri hos andre deltakere', color='black')
   
     
     #EFFEKT SOM BATTERIET KJØPER FRA ANDRE PV-ANLEGG OG ANDRE BATTERIER I NETTVERKET
     axes[1].fill_between(battery_buy_pv.index, 0, battery_buy_pv, color='yellow', alpha=.2)
     axes[1].fill_between(battery_buy_battery.index, 0, battery_buy_battery, color='green', alpha=.3)
     
-    axes[1].set_ylabel('Power (kW)',color='white')
+    axes[1].set_ylabel('Power (kW)',color='black')
     plt.ylabel('Energy (kWh)')
-    axes[1].tick_params(axis='both', colors='white')
-    axes[1].set_title('Kjøp til eget batteri fra andre deltakeres PV/batteri', color='white')
+    axes[1].tick_params(axis='both', colors='black')
+    axes[1].set_title('Kjøp til eget batteri fra andre deltakeres PV/batteri', color='black')
     
     #axes[2].plot(LevelOfCharge.index, LevelOfCharge, color='black', lw=0.5)
     axes[2].fill_between(LevelOfCharge.index, 0, LevelOfCharge, color='grey', alpha=.2)
-    axes[2].set_ylabel('State of Charge (kWh)',color='white')
+    axes[2].set_ylabel('State of Charge (kWh)',color='black')
     plt.ylabel('Energy (kWh)')
-    axes[2].tick_params(axis='both', colors='white')
-    axes[2].set_title('Batteristatus', color='white')
+    axes[2].tick_params(axis='both', colors='black')
+    axes[2].set_title('Batteristatus', color='black')
     
     return
 
