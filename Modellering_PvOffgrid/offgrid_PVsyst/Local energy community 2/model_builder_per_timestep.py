@@ -22,44 +22,39 @@ import trade_pv2batt as trade_pv2batt
 import trade_flex2flex as trade_flex2flex
 #Inneholder filer som redegjør rettferdig handel mellom deltakerene i markedet
 
+#FJERNE DENNE VED FEILSØKING AV KODEN OM NOEN ÅR
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
 '''
 Denne filen simulerer energiflytsvariablene for alle deltakerene i et gitt tidssteg. 
 Funksjonen som kjøres returnerer E. E er en dictionary med energiflytsvariablene 
-tilørende N deltakere for gitt tidssteg.
-
+tilørende N deltakere for tidssteget.
 '''
 
 
-'''
-TESTENE ER GJENNOMFØRT MED HYTTEFELTET
+#----------------------------------------
+#aktiverer deling
+energy_model_activate = 1
 
-time = 4639
-deltakere5 = [4, 2, 1, 1, 1] #Kategorihytte på deltakerene 
-bruksmønster5 = [0, 0, 0, 1, 2] #Bruksmønster på deltakerene
+battery_share_activate = 0
+flex_activate =  0
 
-'''
-
-'''
-(0.3) -> 6651, 4639, 9999, 8656, 19999, 20999, 23999
-'''
-
-
-battery_share_activate = 1 #Inkludere batteriutveksling når de er tomme/fulle
-flex_activate = 1 #Inkludere fleksibel batteriutveksling
-
-flex_limit = 0.1
+flex_limit = 0.4
 #Jo høyere flex_limit, desto høyere batteristatus må flex-batteriet ha for å selge sin henergi.
 #E[j]['LevelOfCharge'] > 0.5*battery_capacity + flex_limit*battery_capacity): -> SELGE
-#(E[j]['LevelOfCharge'] < 0.5*battery_capacity - flex_limit*battery_capacity): -> KJØPE    
+#E[j]['LevelOfCharge'] < 0.5*battery_capacity - flex_limit*battery_capacity): -> KJØPE  
 
-#GROV SPESIFISERING AV DAGER
-month = 12   #month -> 1-12
-day = 31   #day -> 1-30
-hour = 23   #hour -> 1-23
+#-----------------------------------------
+  
+
+#Grov spesifisering av hvilken dag det skal skrives ut handelsverdier for
+#i kontrollvinduet
+month = 9   #month -> 1-12
+day = 15   #day -> 1-30
+hour = 7   #hour -> 1-23
 minute = 45    #kvarter -> 15,30,45
 
-#Time_analysis er det tidssteget som det vises informasjon om i kontrollvinduet. I kontrollvinduet vises hvordan
-#handelen foregår i valgt tidssteg
 time_analysis = (month-1)*2880 + (day-1)*96 + hour*4 + minute/15
 
 
@@ -75,12 +70,11 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
     deltakere_n = len(param)
         
     
-    #ENERGIFLYTSVERDIER FOR HVER DELTAKER I GITT TIDSSTEG FØR ENERGIDELING
+    #ENERGIFLYTSVERDIER FOR HVER DELTAKER I TIDSSTEGET "TIME" BEREGNES FØRST FØR DELING
     #----------------------------------------------------------------------------------------
     for x in range(len(param)):
         
-        
-        
+    
         discharge_limit = param[x]['BatteryDischargeLimit']
         max_power_inverter = param[x]['MaxPowerInverter']
         max_power_battery = param[x]['MaxPower']
@@ -101,14 +95,7 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
             
             LevelOfCharge_previous = discharge_limit    
     
-        '''
-        #FJERNE "FLUER" FRA INPUT DATAENE
-        if (pv[x][time] < 0):
-                pv[x][time] = 0
-            
-        if (demand[x][time] < 0.1):
-                demand[x][time] = 0
-        '''
+
         
         #DEFINERE VARIABLER
         battery_capacity = param[x]['BatteryCapacity']
@@ -117,81 +104,50 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
         timestep = param[x]['timestep']
         
         
-        #Her er virkningsgrad tatt med
-        pv2inv = np.minimum(pv[x][time], demand[x][time]/n_inv) #demand[x][time]/n_inv
-        res_pv = np.maximum(pv[x][time] - demand[x][time]/n_inv, 0) #Lasten som momentant er større en forbruket for det gitte tidssteget
+        #Her er virkningsgrad tatt med. De er tatt med i dette steget der deltaker forsyner seg selv
+        pv2inv = np.minimum(pv[x][time], demand[x][time]/n_inv) 
+        res_pv = np.maximum(pv[x][time] - demand[x][time]/n_inv, 0) 
         inv2load = pv2inv * n_inv
-        res_load = (demand[x][time] - pv2inv * n_inv) #lasten som ikke dekkes av momentan PV #pv2inv
+        res_load = (demand[x][time] - pv2inv * n_inv) 
 
-      
-            
+
         #1. prioritet etter at momentant forburk er dekket -> Forsyne eget batteri
+        #FORSYNE EGET BATTERI
         if LevelOfCharge_previous >= battery_capacity:  
                     pv2store = 0 
             
         else: #BATTERIET ER IKKE FULT, MEN VIL OVERSTIGE MAX KAPASITET VED OPPLADING I GITT TIDSSTEG
                 if (LevelOfCharge_previous + (res_pv * timestep)) > battery_capacity:
                     
-                    #KAN MAX LADE OPP DET SMO ER IGJEN FØR BATTERIET NÅR MAX KAPASITET
+                    #KAN MAX LADE OPP DET SOM ER IGJEN FØR BATTERIET NÅR MAX KAPASITET
                     pv2store = min((battery_capacity - LevelOfCharge_previous)/timestep, max_power_battery)
-                    #OPPLADINGEN BEGRENSES AV MAX LADING PÅ BATTERI
-                    
-                    
+                    #OPPLADING PÅ EGET BATTERI BEGRENSES AV MAX LADEEFFEKT
+
+    
                 else: #BATTERIET ER IKKE FULT OG VIL IKKE OVERTIGE MAX KAPASITET VED OPPLADNING I GITT TIDSSTEG
                     #BEGRENSES AV MAX LADING PÅ BATTERI
                     pv2store = min(res_pv, max_power_battery)
              
-        
-            
-            
+        #Energi som flyter gjennom inverter og til å dekke eget forbruk     
         store2inv = min((LevelOfCharge_previous/timestep-discharge_limit/timestep), res_load/n_inv, max_power_battery)  
-        
-        
-        '''
-        if time == 20999:
-            
-            print('Pv2store : {:.3g}'.format(pv2store))
-            print('store2inv : {:.3g}'.format(store2inv))
-       '''     
-        
-        #LADE OPP DET MAN KAN MED EGEN ENERGI
-        LevelOfCharge = min(LevelOfCharge_previous - (store2inv - pv2store*n_bat) * timestep,  # DC - pv2store*n_bat
-                                   battery_capacity)
-        
-       
 
         
+        #LADE OPP DET MAN KAN MED EGET OVERSKUDD
+        LevelOfCharge = min(LevelOfCharge_previous - (store2inv - pv2store*n_bat) * timestep,  # DC - pv2store*n_bat
+                                   battery_capacity)
+
         #-------------------------------------------------------------------------------------------
         
         
-        #EFFEKT TIL FORBRUK. I BÅDE STORE2INV OG INV2LOAD ER EFFEKTBEGRENSNINGER TATT HENSYN TIL
+        #EFFEKT TIL FORBRUK. 
         inv2load = inv2load + store2inv*n_inv
         
-        '''
-        if time == time_analysis:
-            
-            print()
-            print('Tapt produksjon: {:.3g}'.format(dict_list[time-1][0]['lost_production']))
-            print('Tapt produksjon: {:.3g}'.format(dict_list[time-1][1]['lost_production']))
-            print()
-        '''
         
         #EFFEKT SOM KAN SELGES PÅ MARKEDET
-        lost_production = res_pv - pv2store 
-       
-        '''
-        if time == time_analysis:
-            
-            print('Tapt produksjon: {:.3g}'.format(dict_list[time-1][0]['lost_production']))
-            print('Tapt produksjon: {:.3g}'.format(dict_list[time-1][1]['lost_production']))
-            print()
-        '''
-       
+        lost_production = res_pv - pv2store    
             
         #EFFEKT SOM KAN KJØPES PÅ MARKEDET
         lost_load = demand[x][time] - inv2load  
-        
-      
         
         #DEKLARERE VERDIER FOR PLOTTING
         battery_self_charging = pv2store
@@ -208,19 +164,8 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
         pv_transfer_pv = 0
         pv_self_pv = pv2inv
         
-        #-------------------------------------------------------------------------------------------
-        '''
-        #FJERNE FLUER
-        if lost_load < 0.001:
-            
-            lost_load = 0
-            
-        if lost_production < 0.001:
-            
-            lost_production = 0
-        '''
-        
-        #Energiflytsverdiene for deltaker x i gitt tidssteg før energideling
+      
+        #Energiflytsverdiene legges til i "E" for deltaker x i tidssteg (før energideling)
         E[x] = {'pv2inv': pv2inv,
                     'res_pv': res_pv,
                     'pv2store': pv2store,
@@ -242,7 +187,7 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
                     }
         
         
-       #Etablere bud for deltaker x
+       #Etablere bud-vektorene for deltaker x
         if ((LevelOfCharge < battery_capacity) & (LevelOfCharge > discharge_limit)) :      
         
                       bidding_battery[x] = 3 #KAN KJØPE OG SELGE, MELLOMTING!
@@ -258,8 +203,8 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
                                   
                     bidding_battery[x] = 2 #SELL
              
-        if (lost_production > 0): #SELL -> Det er noe til overs etter å ha forsynt eget anlegg og batteri
-              
+        if (lost_production > 0): 
+        
                bidding_pv[x] = 2 #sell
                    
         else: 
@@ -287,12 +232,9 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
     NÅR KODEN HAR KOMMET HIT, ER DET I TIDSSTEGET ITERERT GJENNOM ALLE DELTAKERENE FØR HANDEL. ALLE DELTAKERENE 
     HAR FORSYNT SEG SELV SÅ LANGT DE REKKER SAMT ETABLERT KJØPE/SELGE BUD.
     '''
- 
-
     
     #-------------------------------------------------------------------------------------------
-    #DEKLARERE VARIABLER,VEKTORER OG INDEX-VEKTORER TIL Å MODELLERE ENERGIMARKEDET
-    
+    #DEKLARERE VARIABLER,VEKTORER OG INDEX-VEKTORER 
     count_sellers_pv = 0
     count_buyers_pv = 0
     count_sellers_battery = 0
@@ -316,7 +258,6 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
     
     #-------------------------------------------------------------------------------------------
     #Registrere hvlike bud deltager "j" legger ut i markedet
-    #iterere gjennom deltagerene
     for j in range(len(param)):  
         
         
@@ -333,7 +274,7 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
             #TELLE ANTALL "SELGERE"
             count_sellers_pv += 1
             
-            #REGISTRERE HVOR MYE (kW) DELTAKEREN SELGER i tidssteget
+            #REGISTRERE HVOR MYE (kW) DELTAKEREN SELGER 
             energy_profit_pv[j] = lost_production
                      
             #REGISTRERE SELGERENS INDEX
@@ -381,30 +322,28 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
          
    
     '''
-    SIDEN ANLEGGET FØRST FORSYNER SEG SELV, GÅR OVERSKUDDS-PV i første omgang TIL Å LADE OPP BATTERIET. DET er SJELDENT 
-    OVERSKUDDS-PV IGJEN (SIDEN BATTERIET i egen installasjon DA MÅ VÆRE FULT) FØR HANDELENE STARTER. DET ER OBSERVERT AT NÅR FLEX_LIMIT ER UNDER 100%, 
-    VIL ALDRI BATTERIENE STÅ FULLE. I DETTE TILFELLE BRUKES EGEN OVERSKUDDS-PV TIL Å LADE EGET BATTERI, FOR SÅ AT BATTERIET (SOM DA OFTEST ER FLEX) SELGER SIN ENERGI TIL FLEX_LIMIT NÅS. 
-    
-    GJØRES DET ET FORSØK DER FLEXLIMIT SETTES TIL 100% (SOM OM VI FJERNE MULIGHETEN TIL Å FLEXE MED SIN ENERGI) OBSERVERES
-    DET AT VI FÅR UTVEKSLING DIREKTE MELLOM PV-ANLEGG. DETTE FORDI EN HYTTE SOM I UTGANGSPUNKTET STÅR TOM, ETTERHVERT 
-    VIL FÅ FULT BATTERI. UTEN FLEX BATTERI VIL DISSE BATTERIENE HA LITEN MULIGHET TIL Å SELGE SIN ENERGI SIDEN DE KUN KAN SELGE VED 
-    100% KAPASITET. DERFOR VIL DET OPPSTÅ SITUASJONER DER PV SENDER DIREKTE TIL PV.
+    SIDEN ANLEGGET INITIELT FORSYNER SEG SELV, GÅR OVERSKUDDS-PV I FØRSTE OMGANG TIL Å LADE OPP EGET BATTERIET. I SITUASJONENE DER DET ER 
+    OVERSKUDSS-PV IGJEN ETTER AT DELTAKEREN HAR FORSYNT SEG SELV, MÅ ENTEN BATTERIET VÆRE FULT ELLER AT DET ER NOE IGJEN ETTER AT 
+    BATTERIET ER LADET OPP MED MAKSIMAL LADEEFFEKT.
     '''
+    
     
     #KODELINJE SOM SKILLER FLEXBATTERIENE BASERT PÅ FLEXLIMIT OG BATTERISTATUS. NOEN FLEXBATTERI STILLER SEG
     #I POSISJON TIL KJØP OG NOEN STILLER SEG I POSISJON TIL SALG.
+    
     for j in index_flex_battery:  
     
-        if (E[j]['LevelOfCharge'] > 0.5*battery_capacity + flex_limit*battery_capacity):
+        if (E[j]['LevelOfCharge'] > (0.5*battery_capacity + flex_limit*battery_capacity)):
         
             index_flex_sell_battery.append(j)
             
             
-        elif (E[j]['LevelOfCharge'] < 0.5*battery_capacity - flex_limit*battery_capacity):
+        elif (E[j]['LevelOfCharge'] < (0.5*battery_capacity - flex_limit*battery_capacity)):
             
             index_flex_buy_battery.append(j)
+           
             
-
+    #Telle flex (selge) og flex (kjøpe)
     count_battery_sell_flex = len(index_flex_sell_battery)
     count_battery_buy_flex = len(index_flex_buy_battery)
 
@@ -412,22 +351,13 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
     #HANDELEN MELLOM STARTER. IF-SETNINGENE LEGGES FREM I PRIORITERINGS-REKKEFØLGEN FOR KJØP OG SALG LAGT FREM I
     #MASTEROPPGAVEN
     
-    '''
-    #Fjerne fluer
-    for j in range(len(param)):
-        
-        if E[j]['lost_load'] < 0.001:
-            
-            E[j]['lost_load'] = 0
-        
-        if E[j]['lost_production'] < 0.001:
-            
-            E[j]['lost_production'] = 0
-    '''       
    
     #Dersom et PV-anlegg har lagt ut et kjøpe-bud, vil det bety at batteriet i egen installasjon har ladet seg ut så langt det
     #rekker før handelen starter (store2inv). Kodelinjen nedenfor fjerner et eventuelt flex-batteri som selger dersom batteriet
     #allerede har forsyn egen installasjon.
+    
+    #Fjerne like element.
+    #EGENTLIG ER BATTERY_SELL OG BATTERY_BUY UNØDVENDIG I KODEN. DETTE FORDI FLEX_BUY OG FLEX_SELL DEKKER DETTE
     common_elements = set(index_buyer_pv) & set(index_flex_sell_battery)
     
     for element in common_elements:
@@ -440,7 +370,7 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
         index_seller_battery.remove(element)
                                   
     
-    #Plotte energiflytsverdier i git tidssteget FØR deling
+    #Skirve ut verdier i kontrollvinduet for ønsket tidssteg.
     if time == time_analysis:
         
             print()
@@ -451,17 +381,17 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
             for i in range(len(param)):
             
                 
-                print('Ikke dekt last for hytte {:.3g}: {:.3g}kW'.format(i,E[i]['lost_load']))
+                print('Ikke dekt last for hytte {:.3g}: {:.3g} kW'.format(i,E[i]['lost_load']))
                 
             
             for i in range(len(param)):
                 
-                print('Produksjonsoverskudd for hytte {:.3g}: {:.3g}kW'.format(i, E[i]['lost_production']))
+                print('Produksjonsoverskudd for hytte {:.3g}: {:.3g} kW'.format(i, E[i]['lost_production']))
                 
 
             for i in range(len(param)):
                 
-                print('Batteristatus for hytte {:.3g}: {:.3g}kWh'.format(i, E[i]['LevelOfCharge']))
+                print('Batteristatus for hytte {:.3g}: {:.3g} kWh'.format(i, E[i]['LevelOfCharge']))
                 
 
             print()
@@ -477,267 +407,176 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
             print('Flex-bud (selge): ', index_flex_sell_battery)
             print('Flex-bud (kjøpe):', index_flex_buy_battery)
             print()
-            print('Totalt overskudd av PV i markedet: {:.3g}'.format(sum_energy_profit_pv))
-            print('Samlet estimert forbruk som ikke blir dekt: {:.3g}'.format(sum_energy_demand_pv))
+            print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+            print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
             print('---------------------------------------------------------------------')
             print()
+    
     
     
     #NEDENFOR STARTER HANDELEN MELLOM DELTAKERENE. KODEN BEVEGER SEG NEDOVER ETTER HVILKE BUD SOM HAR HØYESTE PRIORITET
     #----------------------------------------------------------------------------------------
     
-    #DERSOM DET FINNES KJØPERE OG SELGERE AV MOMENTAN PV
-    if (len(index_buyer_pv) != 0) & (len(index_seller_pv) != 0):
-        
-        #Oppdaterer tellevariabelen
-        dict_count['pv2pv'] += 1
-        
-        #TRADE_PV2PV PÅSER RETTFERDIG HANDEL MELLOM PV-ANLEGG (SE MASTEROPPGAVE)  
-        #SELLER_TRANSFER OG BUYER_TRANSFER ER LISTER SOM INNEHOLDER ANDELEN ENERGI SOM OVERFØRES FOR HVER DELTAKER
-        seller_transfer, buyer_transfer, rest_profit, rest_demand = trade_pv2pv.trade_pv2pv(sum_energy_profit_pv, sum_energy_demand_pv, index_buyer_pv, index_seller_pv, count_buyers_pv, count_sellers_pv, len(param), E)
-        
-        #Spesifisering av hvilken handel som foregår, hvilke salgsandeler som er i spill og totalt underskudd/overskudd av momentan energi i tidssteget
-        if (time == time_analysis):         
+    #Variabelen som aktiverer energideling
+    if energy_model_activate == 1:
     
-            print('Type handel: pv2pv')
-            print('Salgsandeler: ', seller_transfer)
-            print('Kjøpsandeler: ', buyer_transfer)
-            print('Totalt overskudd av PV i markedet: {:.3g}'.format(sum_energy_profit_pv))
-            print('Samlet estimert forbruk som ikke blir dekt: {:.3g}'.format(sum_energy_demand_pv))
-            print()
-        
-        #FØRSTE PRIORITERING. MOMENTAN UTVEKLSING MELLOM PV-ANLEGG MED OVERSKUDD OG UNDERSKUDD
-        for j in index_seller_pv: #SELGER MED INDEX J
-
-          if (time == time_analysis):       
-        
-            print('Produksjonsoverskudd for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(j, E[j]['lost_production']))
-          
-          E[j]['lost_production'] -= seller_transfer[j]
-          
-          '''
-          if E[j]['lost_production'] < 0.001:
-                
-                E[j]['lost_production'] = 0
-          '''      
-          
-          if (time == time_analysis): 
-           
-              print('Produksjonsoverskudd for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(j, E[j]['lost_production']))  
-              
+        #DERSOM DET FINNES KJØPERE OG SELGERE AV MOMENTAN PV
+        if (len(index_buyer_pv) != 0) & (len(index_seller_pv) != 0):
             
-          E[j]['pv_sell_pv'] += seller_transfer[j] #TIL PLOTTING
-          
-          
+            #Oppdaterer tellevariabelen
+            dict_count['pv2pv'] += 1
             
-        for i in index_buyer_pv: #KJØPER MED INDEX I
-                
-                if (time == time_analysis):       
-              
-                  print('Estimert forbruk som ikke blir dekt for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(i, E[i]['lost_load']))
-                  
-                
-                E[i]['lost_load'] -= buyer_transfer[i]
-                E[i]['pv_buy_pv'] += buyer_transfer[i] #TIL PLOTTING
-        
-                '''      
-                if E[i]['lost_load'] < 0.001:
-                    
-                    E[i]['lost_load'] = 0
-                '''
-                    
-                if (time == time_analysis):       
-                  
-                  print('Estimert forbruk som ikke blir dekt for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(i, E[i]['lost_load']))   
-    
-                
-        if time == time_analysis:
-                
-           print('---------------------------------------------------------------------')     
-           
-        sum_energy_demand_pv = rest_demand #DET SOM I TIDSSTEGET ER IGJEN AV "FORBURK SOM IKKE BLIR DEKT" ETTER HANDELEN
-        sum_energy_profit_pv = rest_profit #DET SOM I TIDSSTEGET ER IGJEN AV OVERSKUDDSEFFEKT ETTER HANDELEN
-        
-        #Oppdatere index-vektorene 
-        x = []
-
-        for j in index_seller_pv:
-             
-             if E[j]['lost_production'] != 0:
-                 
-                 x.append(j)
-                 
-        index_seller_pv = x
-         
-        x = []
-         
-        for i in index_buyer_pv:
-             
-             
-             if E[i]['lost_load'] != 0:
-                 
-                 x.append(i)
-                 
-        index_buyer_pv = x       
-              
-        #Bud i marekdet etter handelen         
-        if time == time_analysis:
+            #TRADE_PV2PV PÅSER RETTFERDIG HANDEL MELLOM PV-ANLEGG (SE MASTEROPPGAVE)  
+            #SELLER_TRANSFER OG BUYER_TRANSFER ER LISTER SOM INNEHOLDER ANDELEN ENERGI SOM OVERFØRES FOR HVER DELTAKER
+            seller_transfer, buyer_transfer, rest_profit, rest_demand = trade_pv2pv.trade_pv2pv(sum_energy_profit_pv, sum_energy_demand_pv, index_buyer_pv, index_seller_pv, count_buyers_pv, count_sellers_pv, len(param), E)
             
-               print()
-               print('PV-bud (selge):', index_seller_pv)
-               print('PV-bud (kjøpe): ', index_buyer_pv)
-               print()
-               print('Batteri-bud (selge):', index_seller_battery)
-               print('Batteri-bud (kjøpe): ', index_buyer_battery)
-               print()
-               print('Flex-bud (selge): ', index_flex_sell_battery)
-               print('Flex-bud (kjøpe):', index_flex_buy_battery)
-               print()
-       
-        
-    #Hvis batteriutveksling er aktivert
-    if battery_share_activate == 1:   
-    
-        if (len(index_seller_battery) != 0) & (len(index_buyer_pv) != 0):   
-            
-            dict_count['bat2pv'] += 1
-            seller_trade, buyer_trade, rest_profit, rest_demand  = trade_batt2pv.trade_batt2pv(sum_energy_profit_pv, sum_energy_demand_pv, index_buyer_pv, index_seller_battery, count_buyers_pv, count_sellers_battery, len(param), E, param)
-            
+            #Spesifisering av hvilken handel som foregår, hvilke salgsandeler som er i spill og totalt underskudd/overskudd av momentan energi i tidssteget
             if (time == time_analysis):         
         
-                print('Type handel: bat2pv')
-                print('Salgsandeler: ', seller_trade)
-                print('Kjøpsandeler: ', buyer_trade)
-                print('Totalt overskudd av PV i markedet: {:.3g}'.format(sum_energy_profit_pv))
-                print('Samlet estimert forbruk som ikke blir dekt: {:.3g}'.format(sum_energy_demand_pv))
+                print('Type handel: pv2pv')
+                print('Salgsandeler [kW]: ', seller_transfer)
+                print('Kjøpsandeler [kW]: ', buyer_transfer)
+                print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                print('---------------------------------------------------------------------')
                 print()
             
-            #ANDRE PRIORITET. FULLE BATTERI SELGER TIL MOMENTAN PV
-            for j in index_seller_battery:
-                     
+            #FØRSTE PRIORITERING. MOMENTAN UTVEKLSING MELLOM PV-ANLEGG MED OVERSKUDD OG UNDERSKUDD
+            for j in index_seller_pv: #SELGER MED INDEX J
+    
               if (time == time_analysis):       
             
-                print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(j, E[j]['LevelOfCharge']))
-                
-              E[j]['LevelOfCharge'] -= seller_trade[j] #ENERGY
-                
+                print('Produksjonsoverskudd for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(j, E[j]['lost_production']))
               
-              if (time == time_analysis):       
-            
-                print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(j, E[j]['LevelOfCharge']))
+              E[j]['lost_production'] -= seller_transfer[j]
+              
+              '''
+              if E[j]['lost_production'] < 0.001:
+                    
+                    E[j]['lost_production'] = 0
+              '''      
+              
+              if (time == time_analysis): 
+               
+                  print('Produksjonsoverskudd for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(j, E[j]['lost_production']))  
+                  
                 
-              E[j]['battery_sell_pv'] += seller_trade[j] 
+              E[j]['pv_sell_pv'] += seller_transfer[j] #TIL PLOTTING
+              
+              
                 
-                
-            for i in index_buyer_pv:
-                
+            for i in index_buyer_pv: #KJØPER MED INDEX I
+                    
                     if (time == time_analysis):       
                   
-                      print('Estimert forbruk som ikke blir dekt for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(i, E[i]['lost_load']))    
-                
-                    E[i]['lost_load'] -= buyer_trade[i]
+                      print('Estimert forbruk som ikke blir dekt for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(i, E[i]['lost_load']))
+                      
                     
-                    '''
+                    E[i]['lost_load'] -= buyer_transfer[i]
+                    E[i]['pv_buy_pv'] += buyer_transfer[i] #TIL PLOTTING
+            
+                    '''      
                     if E[i]['lost_load'] < 0.001:
                         
                         E[i]['lost_load'] = 0
                     '''
-                    
+                        
                     if (time == time_analysis):       
+                      
+                      print('Estimert forbruk som ikke blir dekt for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(i, E[i]['lost_load']))   
+        
+                    
+            if time == time_analysis:
+                    
+               print('---------------------------------------------------------------------')     
+               
+            sum_energy_demand_pv = rest_demand #DET SOM I TIDSSTEGET ER IGJEN AV "FORBURK SOM IKKE BLIR DEKT" ETTER HANDELEN
+            sum_energy_profit_pv = rest_profit #DET SOM I TIDSSTEGET ER IGJEN AV OVERSKUDDSEFFEKT ETTER HANDELEN
+            
+            #Oppdatere index-vektorene 
+            x = []
+    
+            for j in index_seller_pv:
+                 
+                 if E[j]['lost_production'] != 0:
+                     
+                     x.append(j)
+                     
+            index_seller_pv = x
+             
+            x = []
+             
+            for i in index_buyer_pv:
+                 
+                 
+                 if E[i]['lost_load'] != 0:
+                     
+                     x.append(i)
+                     
+            index_buyer_pv = x       
                   
-                      print('Estimert forbruk som ikke blir dekt for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(i, E[i]['lost_load']))
-                    
-                    E[i]['pv_buy_battery'] += buyer_trade[i] #POWER      
-                    
-                
-                    
-            if time == time_analysis:
-                    
-               print('---------------------------------------------------------------------')         
-                    
-            sum_energy_demand_pv = rest_demand
-            sum_energy_profit_pv = rest_profit  
-                    
-            x = []
-            
-            for j in index_seller_battery:
-                
-                
-                if E[j]['LevelOfCharge'] == param[j]['BatteryCapacity']:
-                    
-                    x.append(j)
-                
-                else:
-                    
-                    index_flex_sell_battery.append(j)
-                    
-            index_seller_battery = x
-            
-            x = []
-            
-            for i in index_buyer_pv:
-                
-                
-                if E[i]['lost_load'] != 0:
-                    
-                    x.append(i)
-                    
-            index_buyer_pv = x  
-            
-          
+            #Bud i marekdet etter handelen         
             if time == time_analysis:
                 
-                    print()
-                    print('PV-bud (selge):', index_seller_pv)
-                    print('PV-bud (kjøpe): ', index_buyer_pv)
-                    print()
-                    print('Batteri-bud (selge):', index_seller_battery)
-                    print('Batteri-bud (kjøpe): ', index_buyer_battery)
-                    print()
-                    print('Flex-bud (selge): ', index_flex_sell_battery)
-                    print('Flex-bud (kjøpe):', index_flex_buy_battery)
-                    print()
-        
-    #Hvis flex- og batteri-utveksling er aktivert          
-    if (flex_activate == 1) & (battery_share_activate == 1):  
-        
-        
-        if (len(index_flex_sell_battery) != 0) & (len(index_buyer_pv) != 0):  
-        
-            dict_count['flex2pv'] += 1
-            seller_trade, buyer_trade, rest_profit, rest_demand = trade_flex2pv.trade_flex2pv(time, sum_energy_profit_pv, sum_energy_demand_pv, index_buyer_pv, index_flex_sell_battery, count_buyers_pv, count_battery_sell_flex, len(param), E, param)
-                    
-            if (time == time_analysis):         
-        
-                print('Type handel: flex2pv')
-                print('Salgsandeler: ', seller_trade)
-                print('Kjøpsandeler: ', buyer_trade)
-                print('Totalt overskudd av PV i markedet: {:.3g}'.format(sum_energy_profit_pv))
-                print('Samlet estimert forbruk som ikke blir dekt: {:.3g}'.format(sum_energy_demand_pv))
-                print()
+                   print()
+                   print('PV-bud (selge):', index_seller_pv)
+                   print('PV-bud (kjøpe): ', index_buyer_pv)
+                   print()
+                   print('Batteri-bud (selge):', index_seller_battery)
+                   print('Batteri-bud (kjøpe): ', index_buyer_battery)
+                   print()
+                   print('Flex-bud (selge): ', index_flex_sell_battery)
+                   print('Flex-bud (kjøpe):', index_flex_buy_battery)
+                   print()
+                   print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                   print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                   print('---------------------------------------------------------------------')
+                   print()
+           
+           
             
-            #TREDJE PRIORITET. FLEX-BATTERI SELGER TIL MOMENTAN PV
-            for j in index_flex_sell_battery:
+        #Hvis batteriutveksling er aktivert
+        if battery_share_activate == 1:   
+        
+            if (len(index_seller_battery) != 0) & (len(index_buyer_pv) != 0):   
                 
+                dict_count['bat2pv'] += 1
+                seller_trade, buyer_trade, rest_profit, rest_demand  = trade_batt2pv.trade_batt2pv(sum_energy_profit_pv, sum_energy_demand_pv, index_buyer_pv, index_seller_battery, count_buyers_pv, count_sellers_battery, len(param), E, param)
+                
+                
+                if (time == time_analysis):         
+            
+                    print('Type handel: bat2pv')
+                    print('Salgsandeler [kWh]: ', seller_trade)
+                    print('Kjøpsandeler  [kW]: ', buyer_trade)
+                    print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                    print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                    print('---------------------------------------------------------------------')
+                    print()
+                
+                #ANDRE PRIORITET. FULLE BATTERI SELGER TIL MOMENTAN PV
+                for j in index_seller_battery:
+                         
+                  if (time == time_analysis):       
+                
+                    print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(j, E[j]['LevelOfCharge']))
+                    
+                  E[j]['LevelOfCharge'] -= seller_trade[j] #ENERGY
+                    
+                  
+                  if (time == time_analysis):       
+                
+                    print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(j, E[j]['LevelOfCharge']))
+                    
+                  E[j]['battery_sell_pv'] += seller_trade[j] 
+                    
+                    
+                for i in index_buyer_pv:
+                    
                         if (time == time_analysis):       
                       
-                          print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(j, E[j]['LevelOfCharge']))
-                
-                        E[j]['LevelOfCharge'] -= seller_trade[j]
-                        
-                        if (time == time_analysis):       
-                      
-                          print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(j, E[j]['LevelOfCharge']))
-                        
-                        E[j]['battery_sell_pv'] += seller_trade[j]   
-                        
-                
-            for i in index_buyer_pv:
-                            
-                        if (time == time_analysis):       
-                      
-                          print('Estimert forbruk som ikke blir dekt for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(i, E[i]['lost_load']))                       
-                        
+                          print('Estimert forbruk som ikke blir dekt for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(i, E[i]['lost_load']))    
+                    
                         E[i]['lost_load'] -= buyer_trade[i]
                         
                         '''
@@ -748,696 +587,855 @@ def E_per_timestep(dict_list, dict_count, param, time, demand, pv):
                         
                         if (time == time_analysis):       
                       
-                          print('Estimert forbruk som ikke blir dekt for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(i, E[i]['lost_load']))    
+                          print('Estimert forbruk som ikke blir dekt for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(i, E[i]['lost_load']))
+                        
+                        E[i]['pv_buy_battery'] += buyer_trade[i] #POWER      
+                        
+                    
+                        
+                if time == time_analysis:
+                        
+                   print('---------------------------------------------------------------------')         
+                        
+                sum_energy_demand_pv = rest_demand
+                sum_energy_profit_pv = rest_profit  
+                        
+                x = []
+                
+                for j in index_seller_battery:
+                    
+                    
+                    if E[j]['LevelOfCharge'] == param[j]['BatteryCapacity']:
+                        
+                        x.append(j)
+                    
+                    else:
+                        
+                        index_flex_sell_battery.append(j)
+                        
+                index_seller_battery = x
+                
+                x = []
+                
+                for i in index_buyer_pv:
+                    
+                    
+                    if E[i]['lost_load'] != 0:
+                        
+                        x.append(i)
+                        
+                index_buyer_pv = x  
+                
+              
+                if time == time_analysis:
+                    
+                        print()
+                        print('PV-bud (selge):', index_seller_pv)
+                        print('PV-bud (kjøpe): ', index_buyer_pv)
+                        print()
+                        print('Batteri-bud (selge):', index_seller_battery)
+                        print('Batteri-bud (kjøpe): ', index_buyer_battery)
+                        print()
+                        print('Flex-bud (selge): ', index_flex_sell_battery)
+                        print('Flex-bud (kjøpe):', index_flex_buy_battery)
+                        print()
+                        print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                        print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                        print('---------------------------------------------------------------------')
+                        print()
+                
+            
+        #Hvis flex- og batteri-utveksling er aktivert          
+        if (flex_activate == 1) & (battery_share_activate == 1):  
+            
+            
+            if (len(index_flex_sell_battery) != 0) & (len(index_buyer_pv) != 0):  
+            
+                dict_count['flex2pv'] += 1
+                seller_trade, buyer_trade, rest_profit, rest_demand = trade_flex2pv.trade_flex2pv(time, sum_energy_profit_pv, sum_energy_demand_pv, index_buyer_pv, index_flex_sell_battery, count_buyers_pv, count_battery_sell_flex, len(param), E, param)
+                
+                
+                if (time == time_analysis):         
+            
+                    print('Type handel: flex2pv')
+                    print('Salgsandeler [kWh] :', seller_trade)
+                    print('Kjøpsandeler  [kW] :', buyer_trade)
+                    print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                    print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                    print('---------------------------------------------------------------------')
+                    print()
+                
+                #TREDJE PRIORITET. FLEX-BATTERI SELGER TIL MOMENTAN PV
+                for j in index_flex_sell_battery:
+                    
+                            if (time == time_analysis):       
                           
-                        E[i]['pv_buy_battery'] += buyer_trade[i]     
-                        
-                      
-                        
-            if time == time_analysis:
+                              print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.5g} kW'. format(j, E[j]['LevelOfCharge']))
                     
-               print('---------------------------------------------------------------------')             
+                            E[j]['LevelOfCharge'] -= seller_trade[j]
                             
-            sum_energy_demand_pv = rest_demand
-            sum_energy_profit_pv = rest_profit  
-            
-            x = []
-            
-            for j in index_flex_sell_battery:
+                            if (time == time_analysis):       
+                          
+                              print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.5g} kW'. format(j, E[j]['LevelOfCharge']))
+                            
+                            E[j]['battery_sell_pv'] += seller_trade[j]   
+                            
+                    
+                for i in index_buyer_pv:
+                                
+                            if (time == time_analysis):       
+                          
+                              print('Estimert forbruk som ikke blir dekt for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(i, E[i]['lost_load']))                       
+                            
+                            E[i]['lost_load'] -= buyer_trade[i]
+                            
+                            '''
+                            if E[i]['lost_load'] < 0.001:
+                                
+                                E[i]['lost_load'] = 0
+                            '''
+                            
+                            if (time == time_analysis):       
+                          
+                              print('Estimert forbruk som ikke blir dekt for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(i, E[i]['lost_load']))    
+                              
+                            E[i]['pv_buy_battery'] += buyer_trade[i]     
+                            
+                          
+                            
+                if time == time_analysis:
+                        
+                   print('---------------------------------------------------------------------')             
+                                
+                sum_energy_demand_pv = rest_demand
+                sum_energy_profit_pv = rest_profit  
                 
+                x = []
                 
-                if E[j]['LevelOfCharge'] > 0.5*param[i]['BatteryCapacity'] + flex_limit*param[j]['BatteryCapacity']:
-                    
-                    x.append(j)
-                    
-                elif E[j]['LevelOfCharge'] < 0.5*param[i]['BatteryCapacity'] - flex_limit*param[j]['BatteryCapacity']:
-                    
-                    index_flex_buy_battery.append(j)    
+                for j in index_flex_sell_battery:
                     
                     
-            index_flex_sell_battery = x
-            
-            x = []
-            
-            for i in index_buyer_pv:
+                    if E[j]['LevelOfCharge'] > 0.5*param[i]['BatteryCapacity'] + flex_limit*param[j]['BatteryCapacity']:
+                        
+                        x.append(j)
+                        
+                    elif E[j]['LevelOfCharge'] < 0.5*param[i]['BatteryCapacity'] - flex_limit*param[j]['BatteryCapacity']:
+                        
+                        index_flex_buy_battery.append(j)    
+                        
+                        
+                index_flex_sell_battery = x
                 
+                x = []
                 
-                if E[i]['lost_load'] != 0:
+                for i in index_buyer_pv:
                     
-                    x.append(i)
                     
-            index_buyer_pv = x
-            
-            if time == time_analysis:
+                    if E[i]['lost_load'] != 0:
+                        
+                        x.append(i)
+                        
+                index_buyer_pv = x
                 
+                if time == time_analysis:
+                    
+                        print()
+                        print('PV-bud (selge):', index_seller_pv)
+                        print('PV-bud (kjøpe): ', index_buyer_pv)
+                        print()
+                        print('Batteri-bud (selge):', index_seller_battery)
+                        print('Batteri-bud (kjøpe): ', index_buyer_battery)
+                        print()
+                        print('Flex-bud (selge): ', index_flex_sell_battery)
+                        print('Flex-bud (kjøpe):', index_flex_buy_battery)
+                        print()
+                        print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                        print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                        print('---------------------------------------------------------------------')
+                        print()
+                
+          
+                        
+        if battery_share_activate == 1:
+                                      
+            if (len(index_seller_pv) != 0) & (len(index_buyer_battery) != 0):
+                
+                dict_count['pv2bat'] += 1
+                #ANLEGG MED OVERSKUDD SOM FØRSTEPRIORITET?
+                seller_trade, buyer_trade, rest_profit, rest_demand = trade_pv2batt.trade_pv2bat(sum_energy_profit_pv, sum_energy_demand_pv, index_seller_pv, index_buyer_battery, count_sellers_pv, count_buyers_battery, len(param), E, param, time)        
+    
+                if (time == time_analysis):         
+                    
+                    
+                    print('Type handel: pv2bat')
+                    print('Salgsandeler  [kW] :', seller_trade)
+                    print('Kjøpsandeler [kWh] :', buyer_trade)
+                    print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                    print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                    print('---------------------------------------------------------------------')
                     print()
-                    print('PV-bud (selge):', index_seller_pv)
-                    print('PV-bud (kjøpe): ', index_buyer_pv)
-                    print()
-                    print('Batteri-bud (selge):', index_seller_battery)
-                    print('Batteri-bud (kjøpe): ', index_buyer_battery)
-                    print()
-                    print('Flex-bud (selge): ', index_flex_sell_battery)
-                    print('Flex-bud (kjøpe):', index_flex_buy_battery)
-                    print()
-      
                     
-    if battery_share_activate == 1:
-                                  
-        if (len(index_seller_pv) != 0) & (len(index_buyer_battery) != 0):
-            
-            dict_count['pv2bat'] += 1
-            #ANLEGG MED OVERSKUDD SOM FØRSTEPRIORITET?
-            seller_trade, buyer_trade, rest_profit, rest_demand = trade_pv2batt.trade_pv2bat(sum_energy_profit_pv, sum_energy_demand_pv, index_seller_pv, index_buyer_battery, count_sellers_pv, count_buyers_battery, len(param), E, param, time)        
-
-            if (time == time_analysis):         
-                
-                
-                print('Type handel: pv2bat')
-                print('Salgsandeler: ', seller_trade)
-                print('Kjøpsandeler: ', buyer_trade)
-                print('Totalt overskudd av PV i markedet: {:.3g}'.format(sum_energy_profit_pv))
-                print('Samlet estimert forbruk som ikke blir dekt: {:.3g}'.format(sum_energy_demand_pv))
-                print() 
-                
-            #PV-anlegg selger til tomme batteri    
-            for j in index_seller_pv:
-                
-                
-                if (time == time_analysis):       
-                
-                    print('Produksjonsoverskudd for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(j, E[j]['lost_production']))
-                
-                
-                E[j]['lost_production'] -= seller_trade[j]
-                
-                '''
-                if  E[j]['lost_production'] < 0.001:
+                #PV-anlegg selger til tomme batteri    
+                for j in index_seller_pv:
                     
-                    E[j]['lost_production'] = 0
-                
-                '''
-
-                
-                if (time == time_analysis):       
-            
-                    print('Produksjonsoverskudd for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(j, E[j]['lost_production']))
-                
-                E[j]['pv_sell_battery'] += seller_trade[j]
-            
-                
-                
-            for i in index_buyer_battery:
                     
-                
                     if (time == time_analysis):       
-                  
-                      print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(i, E[i]['LevelOfCharge']))
-                
-                    E[i]['LevelOfCharge'] += buyer_trade[i]
                     
+                        print('Produksjonsoverskudd for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(j, E[j]['lost_production']))
+                    
+                    
+                    E[j]['lost_production'] -= seller_trade[j]
+                    
+                    '''
+                    if  E[j]['lost_production'] < 0.001:
+                        
+                        E[j]['lost_production'] = 0
+                    
+                    '''
+    
                     
                     if (time == time_analysis):       
-                  
-                      print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(i, E[i]['LevelOfCharge']))
+                
+                        print('Produksjonsoverskudd for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(j, E[j]['lost_production']))
                     
-                    E[i]['battery_buy_pv'] += buyer_trade[i]
+                    E[j]['pv_sell_battery'] += seller_trade[j]
+                
+                    
+                    
+                for i in index_buyer_battery:
+                        
+                    
+                        if (time == time_analysis):       
                       
+                          print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(i, E[i]['LevelOfCharge']))
                     
-            if time == time_analysis:
-                    
-               print('---------------------------------------------------------------------')       
-                   
-            sum_energy_demand_pv = rest_demand
-            sum_energy_profit_pv = rest_profit
-            
-            
-            x = []
-            
-            for j in index_seller_pv:
+                        E[i]['LevelOfCharge'] += buyer_trade[i]
+                        
+                        
+                        if (time == time_analysis):       
+                      
+                          print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(i, E[i]['LevelOfCharge']))
+                        
+                        E[i]['battery_buy_pv'] += buyer_trade[i]
+                          
+                        
+                if time == time_analysis:
+                        
+                   print('---------------------------------------------------------------------')       
+                       
+                sum_energy_demand_pv = rest_demand
+                sum_energy_profit_pv = rest_profit
                 
                 
-                if E[j]['lost_production'] != 0:
+                x = []
+                
+                for j in index_seller_pv:
                     
-                    x.append(j)
                     
-            index_seller_pv = x
-            
-            x = []
-            
-            for i in index_buyer_battery:
+                    if E[j]['lost_production'] != 0:
+                        
+                        x.append(j)
+                        
+                index_seller_pv = x
+                
+                x = []
+                
+                for i in index_buyer_battery:
+                    
+                    
+                    if E[i]['LevelOfCharge'] == param[i]['BatteryDischargeLimit']:
+                        
+                        x.append(i)
+                        
+                    else:
+                        
+                        index_flex_buy_battery.append(i)    
+                        
+                index_buyer_battery = x
                 
                 
-                if E[i]['LevelOfCharge'] == param[i]['BatteryDischargeLimit']:
+                if time == time_analysis:
                     
-                    x.append(i)
-                    
-                else:
-                    
-                    index_flex_sell_battery.append(i)    
-                    
-            index_buyer_battery = x
-            
-            
-            if time == time_analysis:
+                        print()
+                        print('PV-bud (selge):', index_seller_pv)
+                        print('PV-bud (kjøpe): ', index_buyer_pv)
+                        print()
+                        print('Batteri-bud (selge):', index_seller_battery)
+                        print('Batteri-bud (kjøpe): ', index_buyer_battery)
+                        print()
+                        print('Flex-bud (selge): ', index_flex_sell_battery)
+                        print('Flex-bud (kjøpe):', index_flex_buy_battery)
+                        print()
+                        print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                        print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                        print('---------------------------------------------------------------------')
+                        print()
                 
+                
+            
+        
+        if (flex_activate == 1) & (battery_share_activate == 1):
+            
+            
+            if (len(index_flex_buy_battery) != 0) & (len(index_seller_pv) != 0):
+            
+                dict_count['pv2flex'] += 1
+                seller_trade, buyer_trade, rest_profit, rest_demand = trade_pv2batt.trade_pv2bat(sum_energy_profit_pv, sum_energy_demand_pv, index_seller_pv, index_flex_buy_battery, count_sellers_pv, count_battery_buy_flex, len(param), E, param, time)
+        
+        
+                if (time == time_analysis):         
+            
+                    print('Type handel: pv2flex')
+                    print('Salgsandeler  [kW] : ', seller_trade)
+                    print('Kjøpsandeler [kWh] :', buyer_trade)
+                    print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                    print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                    print('---------------------------------------------------------------------')
                     print()
-                    print('PV-bud (selge):', index_seller_pv)
-                    print('PV-bud (kjøpe): ', index_buyer_pv)
-                    print()
-                    print('Batteri-bud (selge):', index_seller_battery)
-                    print('Batteri-bud (kjøpe): ', index_buyer_battery)
-                    print()
-                    print('Flex-bud (selge): ', index_flex_sell_battery)
-                    print('Flex-bud (kjøpe):', index_flex_buy_battery)
-                    print()
-            
-        
-    
-    if (flex_activate == 1) & (battery_share_activate == 1):
-        
-        
-        if (len(index_flex_buy_battery) != 0) & (len(index_seller_pv) != 0):
-        
-            dict_count['pv2flex'] += 1
-            seller_trade, buyer_trade, rest_profit, rest_demand = trade_pv2batt.trade_pv2bat(sum_energy_profit_pv, sum_energy_demand_pv, index_seller_pv, index_flex_buy_battery, count_sellers_pv, count_battery_buy_flex, len(param), E, param, time)
-    
-            if (time == time_analysis):         
-        
-                print('Type handel: pv2flex')
-                print('Salgsandeler: ', seller_trade)
-                print('Kjøpsandeler: ', buyer_trade)
-                print('Totalt overskudd av PV i markedet: {:.3g}'.format(sum_energy_profit_pv))
-                print('Samlet estimert forbruk som ikke blir dekt: {:.3g}'.format(sum_energy_demand_pv))
-                print()
-                
-            #PV-anlegg selger til flex-batteri     
-            for j in index_seller_pv:
-                
-                if (time == time_analysis):       
-                
-                    print('Produksjonsoverskudd for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(j, E[j]['lost_production']))
-                
-                E[j]['lost_production'] -= seller_trade[j]
-                
-                '''
-                if E[j]['lost_production'] < 0.001:
                     
-                    E[j]['lost_production'] = 0
-                '''
+                #PV-anlegg selger til flex-batteri     
+                for j in index_seller_pv:
+                    
+                    if (time == time_analysis):       
+                    
+                        print('Produksjonsoverskudd for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(j, E[j]['lost_production']))
+                    
+                    E[j]['lost_production'] -= seller_trade[j]
+                    
+                    '''
+                    if E[j]['lost_production'] < 0.001:
+                        
+                        E[j]['lost_production'] = 0
+                    '''
+                    
+                    if (time == time_analysis):       
+                    
+                        print('Produksjonsoverskudd for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(j, E[j]['lost_production']))
+                    
+                    E[j]['pv_sell_battery'] += seller_trade[j]
                 
-                if (time == time_analysis):       
+                    
+                    
+                for i in index_flex_buy_battery:
+                        
+                        if (time == time_analysis):       
+                      
+                          print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(i, E[i]['LevelOfCharge']))
+                        
+                        E[i]['LevelOfCharge'] += buyer_trade[i]
+                        
+                        if (time == time_analysis):       
+                      
+                          print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(i, E[i]['LevelOfCharge']))
+                        
+                        E[i]['battery_buy_pv'] += buyer_trade[i]
+                             
+                        
+                if time == time_analysis:
+                        
+                   print('---------------------------------------------------------------------')      
+        
+                sum_energy_demand_pv = rest_demand
+                sum_energy_profit_pv = rest_profit  
                 
-                    print('Produksjonsoverskudd for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(j, E[j]['lost_production']))
+                x = []
                 
-                E[j]['pv_sell_battery'] += seller_trade[j]
+                for j in index_seller_pv:
+                    
+                    
+                    if E[j]['lost_production'] != 0:
+                        
+                        x.append(j)
+                        
+                index_seller_pv = x
+                
+                x = []
+                
+                for i in index_flex_buy_battery:
+                    
+                    
+                    if E[i]['LevelOfCharge'] < 0.5*param[i]['BatteryCapacity'] - flex_limit*param[i]['BatteryCapacity']:
+                        
+                        x.append(i)
+                        
+                    elif E[j]['LevelOfCharge'] > 0.5*param[i]['BatteryCapacity'] + flex_limit*param[j]['BatteryCapacity']:
+                        
+                        index_flex_sell_battery.append(j)    
+                        
+                index_flex_buy_battery = x
+                
+                
+                if time == time_analysis:
+                    
+                        print()
+                        print('PV-bud (selge):', index_seller_pv)
+                        print('PV-bud (kjøpe): ', index_buyer_pv)
+                        print()
+                        print('Batteri-bud (selge):', index_seller_battery)
+                        print('Batteri-bud (kjøpe): ', index_buyer_battery)
+                        print()
+                        print('Flex-bud (selge): ', index_flex_sell_battery)
+                        print('Flex-bud (kjøpe):', index_flex_buy_battery)
+                        print()
+                        print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                        print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                        print('---------------------------------------------------------------------')
+                        print()
+                
+           
             
+        if battery_share_activate == 1:
+                  
+            if (len(index_seller_battery) != 0) & (len(index_buyer_battery) != 0):
+                
+                dict_count['bat2bat'] += 1
+                seller_trade, buyer_trade, rest_profit, rest_demand  = trade_flex2flex.trade_batt2batt(flex_limit, sum_energy_profit_pv, sum_energy_demand_pv, index_buyer_battery, index_seller_battery, count_sellers_battery, count_buyers_battery, len(param), E, param, time)
+               
                 
                 
-            for i in index_flex_buy_battery:
+                if (time == time_analysis):         
+            
+                    print('Type handel: bat2bat')
+                    print('Salgsandeler [kWh] : ', seller_trade)
+                    print('Kjøpsandeler [kWh] : ', buyer_trade)
+                    print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                    print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                    print('---------------------------------------------------------------------')
+                    print()
+                    
+                #Fulle batteri selger til tomme batteri
+                for j in index_seller_battery:
                     
                     if (time == time_analysis):       
                   
-                      print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(i, E[i]['LevelOfCharge']))
+                      print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(j, E[j]['LevelOfCharge']))
                     
-                    E[i]['LevelOfCharge'] += buyer_trade[i]
-                    
-                    if (time == time_analysis):       
-                  
-                      print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(i, E[i]['LevelOfCharge']))
-                    
-                    E[i]['battery_buy_pv'] += buyer_trade[i]
-                         
-                    
-            if time == time_analysis:
-                    
-               print('---------------------------------------------------------------------')      
-    
-            sum_energy_demand_pv = rest_demand
-            sum_energy_profit_pv = rest_profit  
-            
-            x = []
-            
-            for j in index_seller_pv:
-                
-                
-                if E[j]['lost_production'] != 0:
-                    
-                    x.append(j)
-                    
-            index_seller_pv = x
-            
-            x = []
-            
-            for i in index_flex_buy_battery:
-                
-                
-                if E[i]['LevelOfCharge'] < 0.5*param[i]['BatteryCapacity'] - flex_limit*param[i]['BatteryCapacity']:
-                    
-                    x.append(i)
-                    
-                elif E[j]['LevelOfCharge'] > 0.5*param[i]['BatteryCapacity'] + flex_limit*param[j]['BatteryCapacity']:
-                    
-                    index_flex_sell_battery.append(j)    
-                    
-            index_flex_buy_battery = x
-            
-            
-            if time == time_analysis:
-                
-                    print()
-                    print('PV-bud (selge):', index_seller_pv)
-                    print('PV-bud (kjøpe): ', index_buyer_pv)
-                    print()
-                    print('Batteri-bud (selge):', index_seller_battery)
-                    print('Batteri-bud (kjøpe): ', index_buyer_battery)
-                    print()
-                    print('Flex-bud (selge): ', index_flex_sell_battery)
-                    print('Flex-bud (kjøpe):', index_flex_buy_battery)
-                    print()
-       
-        
-    if battery_share_activate == 1:
-              
-        if (len(index_seller_battery) != 0) & (len(index_buyer_battery) != 0):
-            
-            dict_count['bat2bat'] += 1
-            seller_trade, buyer_trade, rest_profit, rest_demand  = trade_flex2flex.trade_batt2batt(flex_limit, sum_energy_profit_pv, sum_energy_demand_pv, index_buyer_battery, index_seller_battery, count_sellers_battery, count_buyers_battery, len(param), E, param, time)
-           
-            
-            if (time == time_analysis):         
-        
-                print('Type handel: bat2bat')
-                print('Salgsandeler: ', seller_trade)
-                print('Kjøpsandeler: ', buyer_trade)
-                print('Totalt overskudd av PV i markedet: {:.3g}'.format(sum_energy_profit_pv))
-                print('Samlet estimert forbruk som ikke blir dekt: {:.3g}'.format(sum_energy_demand_pv))
-                print()
-                
-            #Fulle batteri selger til tomme batteri
-            for j in index_seller_battery:
-                
-                if (time == time_analysis):       
-              
-                  print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(j, E[j]['LevelOfCharge']))
-                
-                E[j]['LevelOfCharge'] -= seller_trade[j]
-                
-                if (time == time_analysis):       
-              
-                  print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(j, E[j]['LevelOfCharge']))
-                
-                E[j]['battery_sell_battery'] += seller_trade[j]
-                
-                #FLEX BATTERI SOM KJØPER
-            for i in index_buyer_battery:
-               
-                if (time == time_analysis):       
-              
-                  print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(i, E[i]['LevelOfCharge']))
-               
-                E[i]['LevelOfCharge'] += buyer_trade[i]
-                
-                if (time == time_analysis):       
-              
-                  print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(i, E[i]['LevelOfCharge']))
-                
-                E[i]['battery_buy_battery'] += buyer_trade[i]       
-                
-                
-            if time == time_analysis:
-                    
-               print('---------------------------------------------------------------------')
-                
-            sum_energy_demand_pv = rest_demand
-            sum_energy_profit_pv = rest_profit   
-             
-            x = []
-             
-            for j in index_seller_battery:
-                 
-                 
-                 if E[j]['LevelOfCharge'] == param[j]['BatteryDischargeLimit']:
-                     
-                     x.append(j)
-                     
-                 else:
-                     
-                     index_flex_buy_battery.append(j)    
-                     
-            index_seller_battery = x
-             
-            x = []
-             
-            for j in index_buyer_battery:
-                 
-                 
-                 if E[j]['LevelOfCharge'] == param[j]['BatteryCapacity']:
-                     
-                     x.append(j)
-                     
-                 else:
-                     
-                     index_flex_sell_battery.append(j)    
-                     
-            index_buyer_battery = x
-            
-            
-            if time == time_analysis:
-                
-                    print()
-                    print('PV-bud (selge):', index_seller_pv)
-                    print('PV-bud (kjøpe): ', index_buyer_pv)
-                    print()
-                    print('Batteri-bud (selge):', index_seller_battery)
-                    print('Batteri-bud (kjøpe): ', index_buyer_battery)
-                    print()
-                    print('Flex-bud (selge): ', index_flex_sell_battery)
-                    print('Flex-bud (kjøpe):', index_flex_buy_battery)
-                    print()
-        
-    
-    if (flex_activate == 1) & (battery_share_activate == 1):    
-        
-        
-        if (len(index_flex_sell_battery) != 0) & (len(index_buyer_battery) != 0):
-               
-            dict_count['flex2bat'] += 1
-            #FLEX BATTERI SOM SELGER           
-            seller_trade, buyer_trade, rest_profit, rest_demand = trade_flex2flex.trade_batt2batt(flex_limit, sum_energy_profit_pv, sum_energy_demand_pv, index_buyer_battery, index_flex_sell_battery, count_battery_sell_flex, count_buyers_battery, len(param), E, param, time)
-           
-            if (time == time_analysis):         
-        
-                print('Type handel: flex2bat')
-                print('Salgsandeler: ', seller_trade)
-                print('Kjøpsandeler: ', buyer_trade)
-                print('Totalt overskudd av PV i markedet: {:.3g}'.format(sum_energy_profit_pv))
-                print('Samlet estimert forbruk som ikke blir dekt: {:.3g}'.format(sum_energy_demand_pv))
-                print()
-            
-            #Flex-batteri selger til tomme batteri
-            for j in index_flex_sell_battery:
-                
-                if (time == time_analysis):       
-              
-                  print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(j, E[j]['LevelOfCharge']))
-                
-                E[j]['LevelOfCharge'] -= seller_trade[j]
-                
-                if (time == time_analysis):       
-              
-                  print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(j, E[j]['LevelOfCharge']))
-                
-                E[j]['battery_sell_battery'] += seller_trade[j]
-                
-                #FLEX BATTERI SOM KJØPER
-            for i in index_buyer_battery:
-                    
-                
-                if (time == time_analysis):       
-              
-                  print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(i, E[i]['LevelOfCharge']))
-                    
-                E[i]['LevelOfCharge'] += buyer_trade[i]
-                
-                if (time == time_analysis):       
-              
-                  print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(i, E[i]['LevelOfCharge']))
-                
-                E[i]['battery_buy_battery'] += buyer_trade[i]       
-            
-            
-            if time == time_analysis:
-                    
-               print('---------------------------------------------------------------------')    
-                
-            sum_energy_demand_pv = rest_demand
-            sum_energy_profit_pv = rest_profit  
-             
-            x = []
-             
-            for j in index_flex_sell_battery:
-                 
-                 
-                 if E[j]['LevelOfCharge'] > 0.5*param[i]['BatteryCapacity'] + flex_limit*param[j]['BatteryCapacity']:
-                     
-                     x.append(j)
-                     
-                 elif E[j]['LevelOfCharge'] < 0.5*param[i]['BatteryCapacity'] - flex_limit*param[j]['BatteryCapacity']:
-                     
-                     index_flex_buy_battery.append(j)    
-                     
-            index_flex_sell_battery = x
-             
-            x = []
-             
-            for j in index_buyer_battery:
-                 
-                 
-                 if E[j]['LevelOfCharge'] == param[j]['BatteryDischargeLimit']:
-                     
-                     x.append(j)
-                     
-                 else:
-                     
-                     index_flex_buy_battery.append(j)    
-                     
-            index_buyer_battery = x
-            
-            if time == time_analysis:
-                
-                    print()
-                    print('PV-bud (selge):', index_seller_pv)
-                    print('PV-bud (kjøpe): ', index_buyer_pv)
-                    print()
-                    print('Batteri-bud (selge):', index_seller_battery)
-                    print('Batteri-bud (kjøpe): ', index_buyer_battery)
-                    print()
-                    print('Flex-bud (selge): ', index_flex_sell_battery)
-                    print('Flex-bud (kjøpe):', index_flex_buy_battery)
-                    print()
-    
-    
-            
-        if (len(index_flex_buy_battery) != 0) & (len(index_seller_battery) != 0):
-            
-            dict_count['bat2flex'] += 1
-            seller_trade, buyer_trade, rest_profit, rest_demand = trade_flex2flex.trade_batt2batt(flex_limit, sum_energy_profit_pv, sum_energy_demand_pv, index_flex_buy_battery, index_seller_battery, count_sellers_battery, count_battery_buy_flex, len(param), E, param, time)
-           
-            if (time == time_analysis):         
-        
-                print('Type handel: bat2flex')
-                print('Salgsandeler: ', seller_trade)
-                print('Kjøpsandeler: ', buyer_trade)
-                print('Totalt overskudd av PV i markedet: {:.3g}'.format(sum_energy_profit_pv))
-                print('Samlet estimert forbruk som ikke blir dekt: {:.3g}'.format(sum_energy_demand_pv))
-                print()
-            
-            #Fulle batteri selger til flex-batteri
-            for j in index_seller_battery:
-                
-                if (time == time_analysis):       
-              
-                  print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(j, E[j]['LevelOfCharge']))
-                
-                E[j]['LevelOfCharge'] -= seller_trade[j]
-                
-                if (time == time_analysis):       
-              
-                  print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(j, E[j]['LevelOfCharge']))
-                
-                E[j]['battery_sell_battery'] += seller_trade[j]
-                
-                #FLEX BATTERI SOM KJØPER
-            for i in index_flex_buy_battery:
-                    
-                if (time == time_analysis):       
-              
-                  print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(i, E[i]['LevelOfCharge']))
-    
-                E[i]['LevelOfCharge'] += buyer_trade[i]
-                
-                if (time == time_analysis):       
-              
-                  print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(i, E[i]['LevelOfCharge']))
-                
-                E[i]['battery_buy_battery'] += buyer_trade[i]       
-             
-                
-            if time == time_analysis:
-                    
-               print('---------------------------------------------------------------------')
-                
-            sum_energy_demand_pv = rest_demand
-            sum_energy_profit_pv = rest_profit  
-             
-            x = []
-             
-            for j in index_seller_battery:
-                 
-                 
-                 if E[j]['LevelOfCharge'] == param[j]['BatteryCapacity']:
-                     
-                     x.append(j)
-                     
-                 else:
-                     
-                     index_flex_sell_battery.append(j)    
-                     
-            index_seller_battery = x
-             
-            x = []
-             
-            for j in index_flex_buy_battery:
-                 
-                 
-                 if E[j]['LevelOfCharge'] < flex_limit*param[j]['BatteryCapacity']:
-                     
-                     x.append(j)
-                  
-                 else:
-                     
-                     index_flex_sell_battery.append(j)    
-                     
-            index_flex_buy_battery = x
-            
-            
-            if time == time_analysis:
-                
-                    print()
-                    print('PV-bud (selge):', index_seller_pv)
-                    print('PV-bud (kjøpe): ', index_buyer_pv)
-                    print()
-                    print('Batteri-bud (selge):', index_seller_battery)
-                    print('Batteri-bud (kjøpe): ', index_buyer_battery)
-                    print()
-                    print('Flex-bud (selge): ', index_flex_sell_battery)
-                    print('Flex-bud (kjøpe):', index_flex_buy_battery)
-                    print()
-    
-            
-        if (len(index_flex_buy_battery) != 0) & (len(index_flex_sell_battery) != 0):    
-        
-            dict_count['flex2flex'] += 1
-            seller_trade, buyer_trade, rest_profit, rest_demand = trade_flex2flex.trade_batt2batt(flex_limit, sum_energy_profit_pv, sum_energy_demand_pv, index_flex_buy_battery, index_flex_sell_battery, count_battery_sell_flex, count_battery_buy_flex, len(param), E, param, time)
-           
-            if (time == time_analysis):         
-        
-                print('Type handel: flex2flex')
-                print('Salgsandeler: ', seller_trade)
-                print('Kjøpsandeler: ', buyer_trade)
-                print('Totalt overskudd av PV i markedet: {:.3g}'.format(sum_energy_profit_pv))
-                print('Samlet estimert forbruk som ikke blir dekt: {:.3g}'.format(sum_energy_demand_pv))
-                print()
-           
-            #Flex-batteri selger til flex-batteri
-            for j in index_flex_sell_battery:
-                    
-                    if (time == time_analysis):       
-                  
-                      print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(j, E[j]['LevelOfCharge']))
-                
                     E[j]['LevelOfCharge'] -= seller_trade[j]
                     
                     if (time == time_analysis):       
                   
-                      print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(j, E[j]['LevelOfCharge']))
+                      print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(j, E[j]['LevelOfCharge']))
                     
                     E[j]['battery_sell_battery'] += seller_trade[j]
                     
-
-            for i in index_flex_buy_battery:
+                    #FLEX BATTERI SOM KJØPER
+                for i in index_buyer_battery:
                    
                     if (time == time_analysis):       
                   
-                      print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g}'. format(i, E[i]['LevelOfCharge']))
-                          
+                      print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(i, E[i]['LevelOfCharge']))
+                   
                     E[i]['LevelOfCharge'] += buyer_trade[i]
                     
                     if (time == time_analysis):       
                   
-                      print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g}'. format(i, E[i]['LevelOfCharge']))
+                      print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(i, E[i]['LevelOfCharge']))
                     
                     E[i]['battery_buy_battery'] += buyer_trade[i]       
-                                                      
-            
-            if time == time_analysis:
                     
-               print('---------------------------------------------------------------------')        
-               
-            sum_energy_demand_pv = rest_demand
-            sum_energy_profit_pv = rest_profit   
-            
-            x = []
-            
-            for j in index_flex_sell_battery:
+                    
+                if time == time_analysis:
+                        
+                   print('---------------------------------------------------------------------')
+                    
+                sum_energy_demand_pv = rest_demand
+                sum_energy_profit_pv = rest_profit   
+                 
+                x = []
+                 
+                for j in index_seller_battery:
+                     
+                     
+                     if E[j]['LevelOfCharge'] == param[j]['BatteryDischargeLimit']:
+                         
+                         x.append(j)
+                         
+                     else:
+                         
+                         index_flex_buy_battery.append(j)    
+                         
+                index_seller_battery = x
+                 
+                x = []
+                 
+                for j in index_buyer_battery:
+                     
+                     
+                     if E[j]['LevelOfCharge'] == param[j]['BatteryCapacity']:
+                         
+                         x.append(j)
+                         
+                     else:
+                         
+                         index_flex_sell_battery.append(j)    
+                         
+                index_buyer_battery = x
                 
                 
-                if E[j]['LevelOfCharge'] > 0.5*param[i]['BatteryCapacity'] + flex_limit*param[j]['BatteryCapacity']:
+                if time == time_analysis:
                     
-                    x.append(j)
-                    
-                elif E[j]['LevelOfCharge'] < 0.5*param[i]['BatteryCapacity'] - flex_limit*param[j]['BatteryCapacity']:
-                    
-                    index_flex_buy_battery.append(j)    
-                    
-            index_flex_sell_battery = x
-            
-            x = []
-            
-            for j in index_flex_buy_battery:
+                        print()
+                        print('PV-bud (selge):', index_seller_pv)
+                        print('PV-bud (kjøpe): ', index_buyer_pv)
+                        print()
+                        print('Batteri-bud (selge):', index_seller_battery)
+                        print('Batteri-bud (kjøpe): ', index_buyer_battery)
+                        print()
+                        print('Flex-bud (selge): ', index_flex_sell_battery)
+                        print('Flex-bud (kjøpe):', index_flex_buy_battery)
+                        print()
+                        print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                        print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                        print('---------------------------------------------------------------------')
+                        print()
                 
-                
-                if E[j]['LevelOfCharge'] < 0.5*param[i]['BatteryCapacity'] - flex_limit*param[j]['BatteryCapacity']:
-                    
-                    x.append(j)
-                    
-                elif E[j]['LevelOfCharge'] > 0.5*param[i]['BatteryCapacity'] + flex_limit*param[j]['BatteryCapacity']:
-                    
-                    index_flex_sell_battery.append(j)
-                    
-            index_flex_buy_battery = x
             
-            if time == time_analysis:
-                
-                    print()
-                    print('PV-bud (selge):', index_seller_pv)
-                    print('PV-bud (kjøpe): ', index_buyer_pv)
-                    print()
-                    print('Batteri-bud (selge):', index_seller_battery)
-                    print('Batteri-bud (kjøpe): ', index_buyer_battery)
-                    print()
-                    print('Flex-bud (selge): ', index_flex_sell_battery)
-                    print('Flex-bud (kjøpe):', index_flex_buy_battery)
-                    print()
-         
-            
-    #Energiflytsverdier i tidssteget etter energideling   
-    if time == time_analysis:
         
-            print()
-            print('ENERGIFLYTSVERDIER (ETTER DELING) I TIDSSTEG {:.5g}'.format(time))
-            print('Date and time: {:.3g}.{:.3g} {:.3g}:{:.3g}'.format(day,month,hour,minute))
-            print('---------------------------------------------------------------------')
+        if (flex_activate == 1) & (battery_share_activate == 1):    
             
-            for i in range(len(param)):
             
-                
-                print('Ikke dekt last for hytte {:.3g}: {:.3g}kW'.format(i,E[i]['lost_load']))
-                
+            if (len(index_flex_sell_battery) != 0) & (len(index_buyer_battery) != 0):
+                   
+                dict_count['flex2bat'] += 1
+                #FLEX BATTERI SOM SELGER           
+                seller_trade, buyer_trade, rest_profit, rest_demand = trade_flex2flex.trade_batt2batt(flex_limit, sum_energy_profit_pv, sum_energy_demand_pv, index_buyer_battery, index_flex_sell_battery, count_battery_sell_flex, count_buyers_battery, len(param), E, param, time)
+               
+                if (time == time_analysis):         
             
-            for i in range(len(param)):
+                    print('Type handel: flex2bat')
+                    print('Salgsandeler [kWh] :', seller_trade)
+                    print('Kjøpsandeler [kWh] :', buyer_trade)
+                    print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                    print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                    print('---------------------------------------------------------------------')
+                    print()
                 
-                print('Produksjonsoverskudd for hytte {:.3g}: {:.3g}kW'.format(i, E[i]['lost_production']))
+                #Flex-batteri selger til tomme batteri
+                for j in index_flex_sell_battery:
+                    
+                    if (time == time_analysis):       
+                  
+                      print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(j, E[j]['LevelOfCharge']))
+                    
+                    E[j]['LevelOfCharge'] -= seller_trade[j]
+                    
+                    if (time == time_analysis):       
+                  
+                      print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(j, E[j]['LevelOfCharge']))
+                    
+                    E[j]['battery_sell_battery'] += seller_trade[j]
+                    
+                    #FLEX BATTERI SOM KJØPER
+                for i in index_buyer_battery:
+                        
+                    
+                    if (time == time_analysis):       
+                  
+                      print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(i, E[i]['LevelOfCharge']))
+                        
+                    E[i]['LevelOfCharge'] += buyer_trade[i]
+                    
+                    if (time == time_analysis):       
+                  
+                      print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(i, E[i]['LevelOfCharge']))
+                    
+                    E[i]['battery_buy_battery'] += buyer_trade[i]       
                 
-
-            for i in range(len(param)):
                 
-                print('Batteristatus for hytte {:.3g}: {:.3g}kWh'.format(i, E[i]['LevelOfCharge']))
+                if time == time_analysis:
+                        
+                   print('---------------------------------------------------------------------')    
+                    
+                sum_energy_demand_pv = rest_demand
+                sum_energy_profit_pv = rest_profit  
+                 
+                x = []
+                 
+                for j in index_flex_sell_battery:
+                     
+                     
+                     if E[j]['LevelOfCharge'] > 0.5*param[i]['BatteryCapacity'] + flex_limit*param[j]['BatteryCapacity']:
+                         
+                         x.append(j)
+                         
+                     elif E[j]['LevelOfCharge'] < 0.5*param[i]['BatteryCapacity'] - flex_limit*param[j]['BatteryCapacity']:
+                         
+                         index_flex_buy_battery.append(j)    
+                         
+                index_flex_sell_battery = x
+                 
+                x = []
+                 
+                for j in index_buyer_battery:
+                     
+                     
+                     if E[j]['LevelOfCharge'] == param[j]['BatteryDischargeLimit']:
+                         
+                         x.append(j)
+                         
+                     else:
+                         
+                         index_flex_buy_battery.append(j)    
+                         
+                index_buyer_battery = x
+                
+                if time == time_analysis:
+                    
+                        print()
+                        print('PV-bud (selge):', index_seller_pv)
+                        print('PV-bud (kjøpe): ', index_buyer_pv)
+                        print()
+                        print('Batteri-bud (selge):', index_seller_battery)
+                        print('Batteri-bud (kjøpe): ', index_buyer_battery)
+                        print()
+                        print('Flex-bud (selge): ', index_flex_sell_battery)
+                        print('Flex-bud (kjøpe):', index_flex_buy_battery)
+                        print()
+                        print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                        print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                        print('---------------------------------------------------------------------')
+                        print()
+                
+        
+        
+                
+            if (len(index_flex_buy_battery) != 0) & (len(index_seller_battery) != 0):
+                
+                dict_count['bat2flex'] += 1
+                seller_trade, buyer_trade, rest_profit, rest_demand = trade_flex2flex.trade_batt2batt(flex_limit, sum_energy_profit_pv, sum_energy_demand_pv, index_flex_buy_battery, index_seller_battery, count_sellers_battery, count_battery_buy_flex, len(param), E, param, time)
+               
+                if (time == time_analysis):         
+            
+                    print('Type handel: bat2flex')
+                    print('Salgsandeler [kWh] :', seller_trade)
+                    print('Kjøpsandeler [kWh] :', buyer_trade)
+                    print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                    print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                    print('---------------------------------------------------------------------')
+                    print()
+                
+                #Fulle batteri selger til flex-batteri
+                for j in index_seller_battery:
+                    
+                    if (time == time_analysis):       
+                  
+                      print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(j, E[j]['LevelOfCharge']))
+                    
+                    E[j]['LevelOfCharge'] -= seller_trade[j]
+                    
+                    if (time == time_analysis):       
+                  
+                      print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(j, E[j]['LevelOfCharge']))
+                    
+                    E[j]['battery_sell_battery'] += seller_trade[j]
+                    
+                    #FLEX BATTERI SOM KJØPER
+                for i in index_flex_buy_battery:
+                        
+                    if (time == time_analysis):       
+                  
+                      print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(i, E[i]['LevelOfCharge']))
+        
+                    E[i]['LevelOfCharge'] += buyer_trade[i]
+                    
+                    if (time == time_analysis):       
+                  
+                      print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(i, E[i]['LevelOfCharge']))
+                    
+                    E[i]['battery_buy_battery'] += buyer_trade[i]       
+                 
+                    
+                if time == time_analysis:
+                        
+                   print('---------------------------------------------------------------------')
+                    
+                sum_energy_demand_pv = rest_demand
+                sum_energy_profit_pv = rest_profit  
+                 
+                x = []
+                 
+                for j in index_seller_battery:
+                     
+                     
+                     if E[j]['LevelOfCharge'] == param[j]['BatteryCapacity']:
+                         
+                         x.append(j)
+                         
+                     else:
+                         
+                         index_flex_sell_battery.append(j)    
+                         
+                index_seller_battery = x
+                 
+                x = []
+                 
+                for j in index_flex_buy_battery:
+                     
+                     
+                     if E[j]['LevelOfCharge'] < flex_limit*param[j]['BatteryCapacity']:
+                         
+                         x.append(j)
+                      
+                     else:
+                         
+                         index_flex_sell_battery.append(j)    
+                         
+                index_flex_buy_battery = x
+                
+                
+                if time == time_analysis:
+                    
+                        print()
+                        print('PV-bud (selge):', index_seller_pv)
+                        print('PV-bud (kjøpe): ', index_buyer_pv)
+                        print()
+                        print('Batteri-bud (selge):', index_seller_battery)
+                        print('Batteri-bud (kjøpe): ', index_buyer_battery)
+                        print()
+                        print('Flex-bud (selge): ', index_flex_sell_battery)
+                        print('Flex-bud (kjøpe):', index_flex_buy_battery)
+                        print()
+                        print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                        print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                        print('---------------------------------------------------------------------')
+                        print()
+                
+        
+                
+            if (len(index_flex_buy_battery) != 0) & (len(index_flex_sell_battery) != 0):    
+            
+                dict_count['flex2flex'] += 1
+                seller_trade, buyer_trade, rest_profit, rest_demand = trade_flex2flex.trade_batt2batt(flex_limit, sum_energy_profit_pv, sum_energy_demand_pv, index_flex_buy_battery, index_flex_sell_battery, count_battery_sell_flex, count_battery_buy_flex, len(param), E, param, time)
+               
+                if (time == time_analysis):         
+            
+                    print('Type handel: flex2flex')
+                    print('Salgsandeler [kWh] :', seller_trade)
+                    print('Kjøpsandeler [kWh] :', buyer_trade)
+                    print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                    print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                    print('---------------------------------------------------------------------')
+                    print()
+               
+                #Flex-batteri selger til flex-batteri
+                for j in index_flex_sell_battery:
+                        
+                        if (time == time_analysis):       
+                      
+                          print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(j, E[j]['LevelOfCharge']))
+                    
+                        E[j]['LevelOfCharge'] -= seller_trade[j]
+                        
+                        if (time == time_analysis):       
+                      
+                          print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(j, E[j]['LevelOfCharge']))
+                        
+                        E[j]['battery_sell_battery'] += seller_trade[j]
+                        
     
-            print()
+                for i in index_flex_buy_battery:
+                       
+                        if (time == time_analysis):       
+                      
+                          print('Batteristatus for hytte {:.3g} (FØR HANDEL): {:.3g} kW'. format(i, E[i]['LevelOfCharge']))
+                              
+                        E[i]['LevelOfCharge'] += buyer_trade[i]
+                        
+                        if (time == time_analysis):       
+                      
+                          print('Batteristatus for hytte {:.3g} (ETTER HANDEL): {:.3g} kW'. format(i, E[i]['LevelOfCharge']))
+                        
+                        E[i]['battery_buy_battery'] += buyer_trade[i]       
+                                                          
+                
+                if time == time_analysis:
+                        
+                   print('---------------------------------------------------------------------')        
+                   
+                sum_energy_demand_pv = rest_demand
+                sum_energy_profit_pv = rest_profit   
+                
+                x = []
+                
+                for j in index_flex_sell_battery:
+                    
+                    
+                    if E[j]['LevelOfCharge'] > 0.5*param[i]['BatteryCapacity'] + flex_limit*param[j]['BatteryCapacity']:
+                        
+                        x.append(j)
+                        
+                    elif E[j]['LevelOfCharge'] < 0.5*param[i]['BatteryCapacity'] - flex_limit*param[j]['BatteryCapacity']:
+                        
+                        index_flex_buy_battery.append(j)    
+                        
+                index_flex_sell_battery = x
+                
+                x = []
+                
+                for j in index_flex_buy_battery:
+                    
+                    
+                    if E[j]['LevelOfCharge'] < 0.5*param[i]['BatteryCapacity'] - flex_limit*param[j]['BatteryCapacity']:
+                        
+                        x.append(j)
+                        
+                    elif E[j]['LevelOfCharge'] > 0.5*param[i]['BatteryCapacity'] + flex_limit*param[j]['BatteryCapacity']:
+                        
+                        index_flex_sell_battery.append(j)
+                        
+                index_flex_buy_battery = x
+                
+                if time == time_analysis:
+                    
+                        print()
+                        print('PV-bud (selge):', index_seller_pv)
+                        print('PV-bud (kjøpe): ', index_buyer_pv)
+                        print()
+                        print('Batteri-bud (selge):', index_seller_battery)
+                        print('Batteri-bud (kjøpe): ', index_buyer_battery)
+                        print()
+                        print('Flex-bud (selge): ', index_flex_sell_battery)
+                        print('Flex-bud (kjøpe):', index_flex_buy_battery)
+                        print()
+                        print('Totalt overskudd av PV i markedet: {:.3g} kW'.format(sum_energy_profit_pv))
+                        print('Samlet estimert forbruk som ikke blir dekt: {:.3g} kW'.format(sum_energy_demand_pv))
+                        print('---------------------------------------------------------------------')
+                        print()
+                
+             
+                
+        #Energiflytsverdier i tidssteget etter energideling   
+        if time == time_analysis:
             
-            
+                print()
+                print('ENERGIFLYTSVERDIER (ETTER DELING) I TIDSSTEG {:.5g}'.format(time))
+                print('Date and time: {:.3g}.{:.3g} {:.3g}:{:.3g}'.format(day,month,hour,minute))
+                print('---------------------------------------------------------------------')
+                
+                for i in range(len(param)):
+                
+                    
+                    print('Ikke dekt last for hytte {:.3g}: {:.3g} kW'.format(i,E[i]['lost_load']))
+                    
+                
+                for i in range(len(param)):
+                    
+                    print('Produksjonsoverskudd for hytte {:.3g}: {:.3g} kW'.format(i, E[i]['lost_production']))
+                    
     
+                for i in range(len(param)):
+                    
+                    print('Batteristatus for hytte {:.3g}: {:.3g} kWh'.format(i, E[i]['LevelOfCharge']))
+        
+                print()
+                
+                
+        
     
     return(E, dict_count)
+    
+
+
+
+
+
